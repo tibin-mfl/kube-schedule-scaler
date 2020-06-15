@@ -1,15 +1,17 @@
 #!/usr/bin/env python3
-import pykube
+""" Main module of kube-schedule-scaler """
+import os
 import json
 import logging
-import os
-from resources import Deployment
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from time import sleep
+
+import pykube
 from croniter import croniter
 from resources import Deployment
 
 logging.getLogger().setLevel(os.environ.get('LOG_LEVEL', 'INFO'))
+
 
 def get_kube_api():
     """ Initiating the API from Service Account or when running locally from ~/.kube/config """
@@ -17,16 +19,16 @@ def get_kube_api():
         config = pykube.KubeConfig.from_service_account()
     except FileNotFoundError:
         # local testing
-        config = pykube.KubeConfig.from_file(os.path.expanduser("~/.kube/config"))
-    api = pykube.HTTPClient(config)
-    return api
+        config = pykube.KubeConfig.from_file(
+            os.path.expanduser("~/.kube/config"))
+    return pykube.HTTPClient(config)
+
 
 api = get_kube_api()
 
+
 def deployments_to_scale():
-    """
-    Getting the deployments configured for schedule scaling...
-    """
+    """ Getting the deployments configured for schedule scaling """
     deployments = []
     scaling_dict = {}
     for namespace in list(pykube.Namespace.objects(api)):
@@ -35,7 +37,8 @@ def deployments_to_scale():
             annotations = deployment.metadata.get("annotations", {})
             f_deployment = str(namespace + "/" + str(deployment))
 
-            schedule_actions = parse_schedules(annotations.get("zalando.org/schedule-actions", "[]"), f_deployment)
+            schedule_actions = parse_schedules(annotations.get(
+                "zalando.org/schedule-actions", "[]"), f_deployment)
 
             if schedule_actions is None or len(schedule_actions) == 0:
                 continue
@@ -49,25 +52,29 @@ def deployments_to_scale():
 
 
 def parse_schedules(schedules, identifier):
+    """ Parse the JSON schedule """
     try:
         return json.loads(schedules)
-    except Exception as err:
-        logging.error("%s - Error in parsing JSON %s with error" % (identifier, schedules), err)
+    except (TypeError, json.decoder.JSONDecodeError) as err:
+        logging.error("%s - Error in parsing JSON %s", identifier, schedules)
+        logging.exception(err)
         return []
 
 
 def get_delta_sec(schedule):
+    """ Returns the number of seconds passed since last occurence of the given cron expression """
     # get current time
     now = datetime.now()
     # get the last previous occurrence of the cron expression
-    t = croniter(schedule, now).get_prev()
+    time = croniter(schedule, now).get_prev()
     # convert now to unix timestamp
     now = now.replace(tzinfo=timezone.utc).timestamp()
     # return the delta
-    return now - t
+    return now - time
 
 
 def process_deployment(deployment, schedules):
+    """ Determine actions to run for the given deployment and list of schedules """
     namespace, name = deployment.split("/")
     for schedule in schedules:
         # when provided, convert the values to int
@@ -82,11 +89,12 @@ def process_deployment(deployment, schedules):
             max_replicas = int(max_replicas)
 
         schedule_expr = schedule.get("schedule", None)
-        logging.debug("Deployment: %s, Namespace: %s, Replicas: %s, MinReplicas: %s, MaxReplicas: %s, Schedule: %s" % (name, namespace, replicas, min_replicas, max_replicas, schedule_expr))
+        logging.debug("%s %s", deployment, schedule)
+
         # if less than 60 seconds have passed from the trigger
         if get_delta_sec(schedule_expr) < 60:
             # replicas might equal 0 so we check that is not None
-            if replicas != None:
+            if replicas is not None:
                 scale_deployment(name, namespace, replicas)
             # these can't be 0 by definition so checking for existence is enough
             if min_replicas or max_replicas:
@@ -94,30 +102,35 @@ def process_deployment(deployment, schedules):
 
 
 def scale_deployment(name, namespace, replicas):
+    """ Scale the deployment to the given number of replicas """
     try:
-        deployment = Deployment.objects(api).filter(namespace=namespace).get(name=name)
+        deployment = Deployment.objects(api).filter(
+            namespace=namespace).get(name=name)
     except pykube.exceptions.ObjectDoesNotExist:
-        logging.warning("Deployment {}/{} does not exist".format(namespace, name))
+        logging.warning("Deployment %s/%s does not exist", namespace, name)
         return
 
-    if replicas == None or replicas == deployment.replicas:
+    if replicas is None or replicas == deployment.replicas:
         return
     deployment.replicas = replicas
 
     time = datetime.now().strftime("%d-%m-%Y %H:%M UTC")
     try:
         deployment.update()
-        logging.info("Deployment {}/{} scaled to {} replicas at {}".format(namespace, name, replicas, time))
-    except Exception as e:
-        logging.error("Exception raised while updating deployment {}/{}".format(namespace, name))
-        logging.exception(e)
+        logging.info("Deployment %s/%s scaled to %s replicas at %s",
+                     namespace, name, replicas, time)
+    except pykube.exceptions.HTTPError as err:
+        logging.error("Exception raised while updating deployment %s/%s", namespace, name)
+        logging.exception(err)
 
 
 def scale_hpa(name, namespace, min_replicas, max_replicas):
+    """ Adjust hpa min and max number of replicas """
     try:
-        hpa = pykube.HorizontalPodAutoscaler.objects(api).filter(namespace=namespace).get(name=name)
+        hpa = pykube.HorizontalPodAutoscaler.objects(
+            api).filter(namespace=namespace).get(name=name)
     except pykube.exceptions.ObjectDoesNotExist:
-        logging.warning("HPA {}/{} does not exist".format(namespace, name))
+        logging.warning("HPA %s/%s does not exist", namespace, name)
         return
 
     # return if no values are provided
@@ -126,12 +139,12 @@ def scale_hpa(name, namespace, min_replicas, max_replicas):
 
     # return when both are provided but hpa is already up-to-date
     if (hpa.obj["spec"]["minReplicas"] == min_replicas and
-        hpa.obj["spec"]["maxReplicas"] == max_replicas):
+            hpa.obj["spec"]["maxReplicas"] == max_replicas):
         return
 
     # return when only one of them is provided but hpa is already up-to-date
     if ((not min_replicas and max_replicas == hpa.obj["spec"]["maxReplicas"]) or
-        (not max_replicas and min_replicas == hpa.obj["spec"]["minReplicas"])):
+            (not max_replicas and min_replicas == hpa.obj["spec"]["minReplicas"])):
         return
 
     if min_replicas:
@@ -144,19 +157,21 @@ def scale_hpa(name, namespace, min_replicas, max_replicas):
     try:
         hpa.update()
         if min_replicas:
-            logging.info("HPA {}/{} minReplicas set to {} at {}".format(namespace, name, min_replicas, time))
+            logging.info("HPA %s/%s minReplicas set to %s at %s",
+                         namespace, name, min_replicas, time)
         if max_replicas:
-            logging.info("HPA {}/{} maxReplicas set to {} at {}".format(namespace, name, max_replicas, time))
-    except Exception as e:
-        logging.error("Exception raised while updating HPA {}/{}".format(namespace, name))
-        logging.exception(e)
+            logging.info("HPA %s/%s maxReplicas set to %s at %s",
+                         namespace, name, max_replicas, time)
+    except pykube.exceptions.HTTPError as err:
+        logging.error("Exception raised while updating HPA %s/%s", namespace, name)
+        logging.exception(err)
 
 
 if __name__ == "__main__":
     logging.info("Main loop started")
     while True:
         logging.debug("Getting deployments")
-        for deployment, schedules in deployments_to_scale().items():
-            process_deployment(deployment, schedules)
+        for d, s in deployments_to_scale().items():
+            process_deployment(d, s)
         logging.debug("Waiting 50 seconds")
         sleep(50)
