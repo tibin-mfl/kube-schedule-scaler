@@ -12,5 +12,4 @@ WORKDIR /app
 
 COPY schedule_scaling/ /app/
 
-ENV PYTHONPATH "${PYTHONPATH}:/app/schedule_scaling"
 CMD ["python", "-u", "schedule_scaling.py"]
