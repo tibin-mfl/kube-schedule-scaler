@@ -3,7 +3,7 @@
 import os
 import json
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from time import sleep
 
 import pykube
@@ -76,6 +76,13 @@ def get_delta_sec(schedule):
     now = now.replace(tzinfo=timezone.utc).timestamp()
     # return the delta
     return now - time
+
+
+def get_wait_sec():
+    """ Return the number of seconds to wait before the next minute """
+    now = datetime.now()
+    future = datetime(now.year, now.month, now.day, now.hour, now.minute) + timedelta(minutes=1)
+    return (future - now).total_seconds()
 
 
 def process_deployment(deployment, schedules):
@@ -170,8 +177,8 @@ def scale_hpa(name, namespace, min_replicas, max_replicas):
 if __name__ == "__main__":
     logging.info("Main loop started")
     while True:
+        logging.debug("Waiting until the next minute")
+        sleep(get_wait_sec())
         logging.debug("Getting deployments")
         for d, s in deployments_to_scale().items():
             process_deployment(d, s)
-        logging.debug("Waiting 50 seconds")
-        sleep(50)
