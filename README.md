@@ -1,27 +1,36 @@
 ﻿# Kubernetes Schedule Scaler
 
 Kubernetes Schedule Scaler allows you to change the number of running replicas
-of a Deployment at specific times. A common use case is to turn down applications
-that don't need to be available 24/7 to reduce cluster resource utilization.
+of a Deployment at specific times. It can be used is to turn on/off
+applications that don't need to be always available and reduce cluster resource
+utilization, or to adjust the number of replicas when it's known in advance how
+the traffic volume is distributed across different time periods.
+
+## Installation
+
+```
+$ kubectl apply -f https://github.com/citizensadvice/kube-schedule-scaler/raw/master/deploy/deployment.yaml
+```
 
 ## Usage
 
 Just add the annotation to your `Deployment`:
 
-```
+```yaml
   annotations:
     zalando.org/schedule-actions: '[{"schedule": "10 18 * * *", "replicas": "3"}]'
 ```
 
-The following fields are available
-* `schedule` - Typical crontab format
-* `replicas` - the number of replicas to scale to
-* `minReplicas` - in combination with an `hpa` will adjust the `minReplicas` else be ignored
-* `maxReplicas` - in combination with an `hpa` will adjust the `maxReplicas` else be ignored
+The following fields are available:
+
+- `schedule` - cron expression for the schedule
+- `replicas` - the number of replicas to scale to
+- `minReplicas` - in combination with an `HorizontalPodAutoscaler`, will adjust the min number of replicas
+- `maxReplicas` - in combination with an `HorizontalPodAutoscaler`, will adjust the max number of replicas
 
 ### Deployment Example
 
-```bash
+```yaml
 kind: Deployment
 metadata:
   name: nginx-deployment
@@ -30,42 +39,45 @@ metadata:
   annotations:
     zalando.org/schedule-actions: |
       [
-        {"schedule": "30 4 * * 1,2,3,4,5", "minReplicas": "{{{HIGH_LOAD_REPLICAS}}}"},
-        {"schedule": "00 8 * * 1,2,3,4,5", "minReplicas": "{{{REPLICAS}}}"},
-        {"schedule": "00 21 * * 1,2,3,4,5", "minReplicas": "{{{MIN_REPLICAS}}}"},
-        {"schedule": "30 5 * * 6,7", "minReplicas": "{{{HIGH_LOAD_REPLICAS}}}"},
-        {"schedule": "00 9 * * 6,7", "minReplicas": "{{{REPLICAS}}}"},
-        {"schedule": "00 21 * * 6,7", "minReplicas": "{{{MIN_REPLICAS}}}"}
+        {"schedule": "0 7 * * Mon-Fri", "replicas": "1"},
+        {"schedule": "0 19 * * Mon-Fri", "replicas": "0"},
+        {"schedule": "0 12 * * Mon-Fri", "minReplicas": "2", "maxReplicas": "3"},
+        {"schedule": "0 16 * * Mon-Fri", "minReplicas": "1"}
       ]
 ```
 
+When your `Deployment` is not managed by an `HorizontalPodAutoscaler`, setting `replicas` to the desired number of replicas is sufficient.
+
+When an `HorizontalPodAutoscaler` is managing the `Deployment`, it will ignore the Deployment if `replicas` is set to `0`, so setting `replicas` to and `1` and `0` acts as a switch on/off for the application, while `minReplicas` and `maxReplicas` can be used to adjust the desired number of replicas.
+
+In order for the `HorizontalPodAutoscaler` to be detected, it must be called with the same name as the `Deployment` that manages.
+
 ## Debugging
 
-If your scaling action has not been executed for some reason, you can check with the below steps:
+If your scaling action has not been executed for some reason, you can check with the steps below:
 
-```bash
-kubectl get pod | grep kube-schedule
-kube-schedule-scaler-75644b8f79-h59s2                    1/1       Running                 0          3d
 ```
-Check the logs for your specific deployment/stack
-```bash
-kubectl logs kube-schedule-scaler-75644b8f79-h59s2 | grep scale | grep node-live
-Stack pegasus-node-live has been scaled successfully to 40 minReplicas at 11-03-2019 21:00 UTC
-Stack pegasus-node-live has been scaled successfully to 120 minReplicas at 12-03-2019 05:30 UTC
-Stack pegasus-node-live has been scaled successfully to 80 minReplicas at 12-03-2019 07:00 UTC
-Stack pegasus-node-live has been scaled successfully to 40 minReplicas at 12-03-2019 21:00 UTC
-Stack pegasus-node-live has been scaled successfully to 120 minReplicas at 13-03-2019 05:30 UTC
-Stack pegasus-node-live has been scaled successfully to 80 minReplicas at 13-03-2019 07:00 UTC
-Stack pegasus-node-live has been scaled successfully to 40 minReplicas at 13-03-2019 21:00 UTC
-Stack pegasus-node-live has been scaled successfully to 120 minReplicas at 14-03-2019 05:30 UTC
-Stack pegasus-node-live has been scaled successfully to 80 minReplicas at 14-03-2019 07:00 UTC
-Stack pegasus-node-live has been scaled successfully to 40 minReplicas at 14-03-2019 21:00 UTC
-Stack pegasus-node-live has been scaled successfully to 120 minReplicas at 15-03-2019 05:30 UTC
-Stack pegasus-node-live has been scaled successfully to 80 minReplicas at 15-03-2019 07:00 UTC
+$ kubectl get pods -n kube-schedule-scaler
+NAME                                    READY   STATUS    RESTARTS   AGE
+kube-schedule-scaler-844b6d5888-p9tc4   1/1     Running   0          3m12s
 ```
 
-Check for specific deployment at specific time
-```bash
-kubectl logs kube-schedule-scaler-87f9649f5-btnt7 | grep nginx-deployment-2 | grep "28-12-2018 09:50"
-Deployment nginx-deployment-2 has been scaled successfully to 4 replica at 28-12-2018 09:50 UTC
+Check the logs for your specific deployment:
 ```
+$ kubectl logs -n kube-schedule-scaler kube-schedule-scaler-844b6d5888-p9tc4 | grep -i 'nginx'
+17-06-2020 20:11:00 INFO - main.py:131 - Deployment default/nginx scaled to 1 replicas
+17-06-2020 20:12:00 INFO - main.py:169 - HPA default/nginx minReplicas set to 3
+17-06-2020 20:12:00 INFO - main.py:171 - HPA default/nginx maxReplicas set to 4
+17-06-2020 20:13:00 INFO - main.py:169 - HPA default/nginx minReplicas set to 1
+17-06-2020 20:13:00 INFO - main.py:171 - HPA default/nginx maxReplicas set to 2
+```
+
+Check for specific deployment at specific time:
+
+```
+$ kubectl logs -n kube-schedule-scaler kube-schedule-scaler-844b6d5888-p9tc4 | grep -i 'nginx' | grep '20:12'
+17-06-2020 20:12:00 INFO - main.py:169 - HPA default/nginx minReplicas set to 3
+17-06-2020 20:12:00 INFO - main.py:171 - HPA default/nginx maxReplicas set to 4
+```
+
+You can change the log level using the `LOG_LEVEL` environment variable (e.g. `LOG_LEVEL=DEBUG`)
