@@ -11,4 +11,4 @@ WORKDIR /app
 
 COPY schedule_scaling/ /app/
 
-CMD ["python", "-u", "schedule_scaling.py"]
+CMD ["python", "-u", "main.py"]
