@@ -10,7 +10,12 @@ import pykube
 from croniter import croniter
 from resources import Deployment
 
-logging.getLogger().setLevel(os.environ.get('LOG_LEVEL', 'INFO'))
+
+logging.basicConfig(
+    level=os.environ.get("LOG_LEVEL", "INFO"),
+    format="%(asctime)s %(levelname)s - %(filename)s:%(lineno)d - %(message)s",
+    datefmt='%d-%m-%Y %H:%M:%S'
+)
 
 
 def get_kube_api():
@@ -114,11 +119,9 @@ def scale_deployment(name, namespace, replicas):
         return
     deployment.replicas = replicas
 
-    time = datetime.now().strftime("%d-%m-%Y %H:%M UTC")
     try:
         deployment.update()
-        logging.info("Deployment %s/%s scaled to %s replicas at %s",
-                     namespace, name, replicas, time)
+        logging.info("Deployment %s/%s scaled to %s replicas", namespace, name, replicas)
     except pykube.exceptions.HTTPError as err:
         logging.error("Exception raised while updating deployment %s/%s", namespace, name)
         logging.exception(err)
@@ -153,15 +156,12 @@ def scale_hpa(name, namespace, min_replicas, max_replicas):
     if max_replicas:
         hpa.obj["spec"]["maxReplicas"] = max_replicas
 
-    time = datetime.now().strftime("%d-%m-%Y %H:%M UTC")
     try:
         hpa.update()
         if min_replicas:
-            logging.info("HPA %s/%s minReplicas set to %s at %s",
-                         namespace, name, min_replicas, time)
+            logging.info("HPA %s/%s minReplicas set to %s", namespace, name, min_replicas)
         if max_replicas:
-            logging.info("HPA %s/%s maxReplicas set to %s at %s",
-                         namespace, name, max_replicas, time)
+            logging.info("HPA %s/%s maxReplicas set to %s", namespace, name, max_replicas)
     except pykube.exceptions.HTTPError as err:
         logging.error("Exception raised while updating HPA %s/%s", namespace, name)
         logging.exception(err)
