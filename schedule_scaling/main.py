@@ -88,6 +88,12 @@ def get_wait_sec():
 def process_deployment(deployment, schedules):
     """ Determine actions to run for the given deployment and list of schedules """
     namespace, name = deployment.split("/")
+    try:
+        deployment_obj = Deployment.objects(api).filter(
+            namespace=namespace).get(name=name)
+    except pykube.exceptions.ObjectDoesNotExist:
+        logging.warning("Deployment %s/%s does not exist", namespace, name)
+    
     for schedule in schedules:
         # when provided, convert the values to int
         replicas = schedule.get("replicas", None)
@@ -99,6 +105,9 @@ def process_deployment(deployment, schedules):
         max_replicas = schedule.get("maxReplicas", None)
         if max_replicas:
             max_replicas = int(max_replicas)
+        replica_percentage = schedule.get("replica_percentage", None)
+        if replica_percentage:
+            logging.debug("There are {} replicas in {}{}".format(deployment_obj.replicas,namespace,name)
 
         schedule_expr = schedule.get("schedule", None)
         logging.debug("%s %s", deployment, schedule)
