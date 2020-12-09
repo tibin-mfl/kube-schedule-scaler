@@ -34,10 +34,6 @@ rules:
 - apiGroups: ["apps"]
   resources: ["deployments"]
   verbs: ["get", "list", "patch"]
-- apiGroups: ["autoscaling", "extensions"]
-  resources:
-    - horizontalpodautoscalers
-  verbs: ["get", "list", "patch"]
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -62,7 +58,7 @@ spec:
         runAsUser: 1000
       containers:
       - name: kube-schedule-scaler
-        image: "citizensadvice/kube-schedule-scaler:latest"
+        image: "306071835704.dkr.ecr.ap-southeast-1.amazonaws.com/devops/kube-schedule-scaler:v2"
         imagePullPolicy: Always
         resources:
           limits:

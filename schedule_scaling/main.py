@@ -12,7 +12,7 @@ from resources import Deployment
 
 
 logging.basicConfig(
-    level=os.environ.get("LOG_LEVEL", "INFO"),
+    level=os.environ.get("LOG_LEVEL", "DEBUG"),
     format="%(asctime)s %(levelname)s - %(filename)s:%(lineno)d - %(message)s",
     datefmt='%d-%m-%Y %H:%M:%S'
 )
@@ -107,7 +107,10 @@ def process_deployment(deployment, schedules):
             max_replicas = int(max_replicas)
         replica_percentage = schedule.get("replica_percentage", None)
         if replica_percentage:
-            logging.debug("There are {} replicas in {}{}".format(deployment_obj.replicas,namespace,name)
+            current_replicas = deployment_obj.replicas
+            logging.debug("There are {} replicas in {}-{}".format(current_replicas,namespace,name))
+            replicas = int((int(replica_percentage) * int(current_replicas))/100) + int(current_replicas)
+            logging.debug("Replica will be {}, ({}%  of current replica + current replica) current replica: {}".format(replicas,replica_percentage,current_replicas))
 
         schedule_expr = schedule.get("schedule", None)
         logging.debug("%s %s", deployment, schedule)
