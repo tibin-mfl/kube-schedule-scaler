@@ -12,7 +12,7 @@ from resources import Deployment
 
 
 logging.basicConfig(
-    level=os.environ.get("LOG_LEVEL", "INFO"),
+    level=os.environ.get("LOG_LEVEL", "DEBUG"),
     format="%(asctime)s %(levelname)s - %(filename)s:%(lineno)d - %(message)s",
     datefmt='%d-%m-%Y %H:%M:%S'
 )
@@ -88,6 +88,12 @@ def get_wait_sec():
 def process_deployment(deployment, schedules):
     """ Determine actions to run for the given deployment and list of schedules """
     namespace, name = deployment.split("/")
+    try:
+        deployment_obj = Deployment.objects(api).filter(
+            namespace=namespace).get(name=name)
+    except pykube.exceptions.ObjectDoesNotExist:
+        logging.warning("Deployment %s/%s does not exist", namespace, name)
+    
     for schedule in schedules:
         # when provided, convert the values to int
         replicas = schedule.get("replicas", None)
@@ -99,6 +105,12 @@ def process_deployment(deployment, schedules):
         max_replicas = schedule.get("maxReplicas", None)
         if max_replicas:
             max_replicas = int(max_replicas)
+        replica_percentage = schedule.get("replica_percentage", None)
+        if replica_percentage:
+            current_replicas = deployment_obj.replicas
+            logging.debug("There are {} replicas in {}-{}".format(current_replicas,namespace,name))
+            replicas = int((int(replica_percentage) * int(current_replicas))/100) + int(current_replicas)
+            logging.debug("Replica will be {}, ({}%  of current replica + current replica) current replica: {}".format(replicas,replica_percentage,current_replicas))
 
         schedule_expr = schedule.get("schedule", None)
         logging.debug("%s %s", deployment, schedule)
